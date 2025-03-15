@@ -5,7 +5,7 @@
 2. [Dataset Description](#dataset-description)
 3. [Methods and Approach](#methods-and-approach)
 4. [Key Findings](#key-findings)
-5. [Limitations and Future Work](#limitations-and-future-work)
+5. [Limitations and Future Directions](#limitations-and-future-directions)
 6. [Repository Structure](#repository-structure)
 7. [Technical Skills Demonstrated](#technical-skills-demonstrated)
 
