@@ -1,0 +1,1031 @@
+---
+title: "A/B Testing with Lingua"
+clean: true
+author: "Liam A. Doyle"
+format: html
+code-fold: true
+theme: journal
+toc: true
+toc-depth: 3
+toc-title: "Table of Contents"
+embed-resources: true
+editor: visual
+---
+
+## Introduction
+
+In this project, I simulated and analyzed A/B testing data for a fictional app called Lingua. The app is designed to help users learn Italian through the completion of interactive language lessons.
+
+In this scenario, the original state of the app involved standard, text-based lessons and exercises (i.e., version A). However, the developers wanted to pilot a new version of the app that replicated some of the design features of the popular language learning app, Duolingo. Specifically, the developers randomly recruited 500 users to test a new version of Lingua that "gamified" lessons by adding points, badges, and streak tracking (i.e., version B). A randomly selected subset of users (experiencing Version A) was paired with the experimental sample as a control. Users were tracked over the course of one month.
+
+The high-level goals of this project were as follows:
+
+1.  Through simulation, create a realistic dataset for A/B testing.
+2.  Apply Bayesian statistical models to assess differences between groups.
+3.  Visualize and interpret results.
+
+To accomplish these goals, I followed a workflow that involved:
+
+1.  Importing and setting up necessary packages.
+2.  Simulating a dataset for analysis.
+3.  Conducting exploratory data analysis (EDA).
+4.  Performing Bayesian A/B testing.
+5.  Presenting findings with visualizations.
+
+## Structure of the Simulated Dataset
+
+Prior to simulating the data, I brainstormed what kinds of variables I would expect to see in an A/B testing scenario for this company. Broadly,
+
+In this situation, I expected to see a dataset with the following variables.
+
+1.  `user_id`
+
+-   A sequential numeric variable (e.g., 1, 2, 3...N)
+-   Acts as a unique identifier for each user
+
+2.  `testing_group`
+
+-   A categorical variable (A = control, B = test)
+-   Roughly half of the total sample was from each group
+
+3.  `gender`
+
+-   A categorical variable (i.e., `Male`, `Female`)
+-   Represents the gender that the user selected when registering their account
+
+4.  `location`
+
+-   Categorical (North America, Europe)
+-   The geographic location of the user, defined broadly by region
+
+5.  `user_age`
+
+-   Continuous numeric variable expressed in years
+-   Represents the age of the user based on their self-reported date of birth
+
+6.  `proficiency_level`
+
+-   Categorical variable (`Beginner`, `Intermediate`, `Advanced`)
+-   The language proficiency that the user indicates when first registering an account
+
+7.  `time_spent`
+
+-   Continuous numeric variable expressed in minutes
+-   Represents the number of minutes that a given user spent on the app over the testing period.
+
+8.  `goal_completed`
+
+-   Binary numeric variable (0 = did not complete, 1 = completed)
+-   Represents whether a given user completed the app's monthly goal of 30 lessons.
+
+9.  `satisfaction`
+
+-   Ordinal numeric variable ranging from 1 to 10
+-   Indicates user responses to the question "Are you satisfied with your user experience?", delivered at the end of the testing timeframe.
+
+## Importing Packages
+
+In this project, I used the following packages:
+
+-   `tidyverse`
+-   `simstudy`
+- `gt`
+- `easystats`
+- `DT`
+- `skimr`
+- `bayesplot`
+- `posterior`
+- `bestNormalize`
+- `BayesFactor`
+- `rstanarm`
+
+```{r loading packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(simstudy)
+library(gt)
+library(gtsummary)
+library(easystats)
+library(DT)
+library(skimr)
+library(bayesplot)
+library(posterior)
+library(bestNormalize)
+library(BayesFactor)
+library(rstanarm)
+
+set.seed(123) # setting seed for reproducibility
+
+options(digits = 3) # setting digits for rounding
+knitr::opts_chunk$set(digits = 3)
+
+options (scipen = 999) # disable scientific notation
+```
+
+## Creating A/B Testing Data
+
+Now that I have the necessary packages, I can start simulating my dataset. To do so, I used the `fabricatr` package, which has a number of useful tools for this task. I also used `dplyr` to create several variables.
+
+### User Demographics
+
+To begin with, I defined the user attributes that did not depend on other variables, such as `testing_group`, `gender`, and `location`. My thought was that this would provide me with a skeleton to work off of for the simulation of the target variables (e.g., `time_spent`).
+
+The first variable that I defined in `simstudy` was `testing_group`. As discussed in the introduction, there are two groups in the data: the control group (A) and the test group (B). `testing_group` indicates what group a given user belongs to. Our split should be roughly 50/50. I generated this data using a binary distribution with a 50% chance of pulling a 1 (i.e., testing_group = B).
+
+Next, I defined the simulation parameters for the `gender` variable, which indicated what users indicated their gender was when signing up for the app. I used a binary distribution, assuming a rough population distribution of 54% female and 46% male.
+
+Our next variable - `location` - represents what region of the world that the user is located in. As this app focuses on teaching the Italian language to users, I will concentrate on users in North America and Europe - the most common continents for online Italian language learning. I will assume a division of 40% to 60% in favour of Europe (location = 1). Again, I used the binary distribution to simulate this variable.
+
+The `user_age` variable represents the age of the given user. I used a normal distribution with a mean of 35 and a standard deviation of 10 to simulate this variable.
+
+The last non-conditional variable is `proficiency_level`, which indicates the self-reported language proficiency of the user at signup. For the sake of our simulation, I can define this variable as categorical and occurring at three levels: "Beginner", "Intermediate", and "Advanced". It can be realistically assumed that the distribution is right-skewed, such that a greater number of users on the app are beginners. As such, a priori probabilities were assigned for sampling such that 60% of the population are "Beginners", 30% of the population are "Intermediate", and 10% of the population are "Advanced". I used the `categorical` distribution for this variable.
+
+```{r user_demographics}
+defs <- defData(varname = "testing_group",
+                dist = "binary",
+                formula = 0.5)
+
+defs <- defData(defs,
+                varname = "gender",
+                dist = "binary",
+                formula = 0.54)
+
+defs <- defData(defs,
+                varname = "location",
+                dist = "binary",
+                formula = 0.6)
+
+defs <- defData(defs, 
+                varname = "user_age",
+                dist = "normal",
+                formula = 35,
+                variance = 10^2)
+
+defs <- defData(defs,
+                varname = "proficiency_level",
+                dist = "categorical",
+                formula = "0.6;0.3;0.1",
+                id = "testing_group")
+```
+
+### Target Variables
+
+Now, I will simulate the target variables - `time_spent`, `goal_completed`, and `satisfaction` - with an eye to tying them to the variables I created previously. In other words, a variable like `time_spent` will be conditional on the value of other variables, such as `proficiency_level` and `testing_group`.
+
+My first target variable is `time_spent`, which indicates the average amount of time a given user spends each day on the app during the testing period. For the sake of my simulation, I have made this variable contingent on two other variables: `proficiency_level` and `testing_group`. Specifically, the data has been simulated such that (a) more advanced users tend to spend longer periods of time on the app and (b) users in the testing condition spend longer periods of time on the app. In addition, women and younger users tended to spend more time on the app.
+
+The second target variable is `goal_completed`. This represents whether or not a user completed their monthly goal of 30 lessons (i.e., roughly 1 lesson a day). For the sake of variety, this was represented as a dichotomous variable (i.e., 0 = did not complete goal, 1 = completed goal). This variable was conditioned on `time_spent`, such that users who averaged longer periods of interaction with the app during the testing period were more likely to complete the monthly goal. It was also conditioned on `testing_group`, such that users in the experimental group (i.e., group B) were more likely to complete their goal.
+
+The final variable that I had to simulate was `satisfaction`. This was an ordinal variable on a Likert-type scale, ranging from 1 (*Completely Dissatisfied*) to 10 (*Completely Satisfied*), with 5 (*Neither Dissatisfied or Satisfied*) as a midpoint or anchor. Again, `satisfaction` was to be conditioned on other variables (i.e., `time_spent`, `testing_group`, and `goal_completed`).
+
+```{r target variables}
+defs <- defData(defs,
+                varname = "time_spent",
+                dist = "gamma",
+                formula = "10 + 1 * proficiency_level + 1.8 * testing_group + 1 * gender - 0.05 * user_age",
+                variance = 0.3)
+
+defs <- defData(defs, 
+                varname = "goal_prob", 
+                dist = "nonrandom",
+                formula = "0 + 0.1 * time_spent + 0.35 * testing_group + 0.15 * gender - 0.03 * user_age + 0.1 * location",
+                variance = 1)
+
+defs <- defData(defs, 
+                varname = "goal_completed", 
+                dist = "binary", 
+                formula = "1 / (1 + exp(-goal_prob))")
+
+defs <- defData(defs, varname = "satisfaction", 
+                dist = "normal",
+                formula = "5.5 + 0.5 * goal_completed + 0.1 * time_spent + 0.3 * testing_group",
+                variance = 2^1)
+
+simulation <- genData(1000, defs)
+```
+
+### Final Touches
+
+Before I start my analysis, there are a few things that I want to revisit to ensure that the dataset is realistically arranged (e.g., adding floors to variables that cannot have negative values). I also wanted to remove the `goal_prob` variable, as it was an intermediary variable that will not be used in anaylsis. Lastly, I want to convert variables such as `gender` to factors.
+
+```{r final dataset}
+data <- tibble(simulation)
+
+data <- data %>%
+  select(-goal_prob) %>%
+  mutate(testing_group = factor(testing_group, levels = c(0, 1), labels = c("A", "B")),
+         gender = factor(gender, levels = c(0, 1), labels = c("Male", "Female")),
+         location = factor(location, levels = c(0, 1), labels = c("North America", "Europe")),
+         user_age = pmin(pmax(as.integer(user_age), 9), 75),
+         proficiency_level = factor(proficiency_level, levels = c(1, 2, 3), labels = c("Beginner", "Intermediate", "Advanced")),
+         time_spent = pmax(time_spent, 0),
+         satisfaction = pmax(pmin(as.integer(satisfaction), 10), 1)
+         )
+
+# important: uncomment the next line only when you want to update the saved data
+# saveRDS(data, "data.rds")
+```
+
+## Exploratory Data Analysis
+
+To explore the data, I used the `DT` package to generate an interactive table of the data using the `datatable` function.
+
+```{r datatable}
+data <- readRDS("data.rds")
+
+datatable(data) %>%
+  formatRound(columns = "time_spent", digits = 2)
+```
+
+### Summary Statistics
+
+As I wanted a more in-depth summary of the data, I used the `skimr` package to examine the structure of the data and view some summary statistics.
+
+```{r skimr}
+data %>%
+  select(-id) %>%
+  skim()
+```
+
+### Correlations
+
+Next, I examined the associations between the variables.
+
+```{r correlations}
+data %>%
+  select(-id) %>%
+  mutate(testing_group = as.numeric(testing_group),
+         gender = as.numeric(gender),
+         location = as.numeric(location),
+         proficiency_level = as.numeric(proficiency_level)) %>%
+  correlation()
+```
+
+### Tables
+
+I also wanted to examine the distribution of numeric/categorical variables by `testing_group`.
+
+```{r tables, message=FALSE, warning=FALSE}
+table_1 <- data %>%
+  select(testing_group, gender) %>%
+  tbl_summary(by = testing_group)
+
+table_2 <- data %>%
+  select(testing_group, location) %>%
+  tbl_summary(by = testing_group)
+
+table_3 <- data %>%
+  select(testing_group, user_age) %>%
+  tbl_summary(by = testing_group)
+
+table_4 <- data %>%
+  select(testing_group, proficiency_level) %>%
+  tbl_summary(by = testing_group)
+
+table_5 <- data %>%
+  select(testing_group, time_spent) %>%
+  tbl_summary(by = testing_group)
+
+table_6 <- data %>%
+  select(testing_group, goal_completed) %>%
+  tbl_summary(by = testing_group)
+
+table_7 <- data %>%
+  select(testing_group, satisfaction) %>%
+  tbl_summary(by = testing_group)
+
+all_tables <- tbl_stack(list(table_1, table_2, table_3, table_4, 
+                             table_5, table_6, table_7))
+
+all_tables
+```
+
+### Visualizing Continuous Variables
+
+To visualize the continuous variables in the data (i.e., `time_spent`, `goal_completed`, and `satisfaction`), I used `ggplot2` to generate histograms and box plots.
+
+#### Histograms of Continuous Variables
+
+```{r histograms, warning=FALSE, message=FALSE}
+continuous_vars <- c(
+  "time_spent",
+  "user_age"
+)
+
+continuous_histograms <- map(continuous_vars, ~ {
+  ggplot(data, aes(x = .data[[.x]])) +
+    geom_histogram(fill = "tan",
+                   color = "black",
+                   alpha = 0.7) + 
+    geom_vline(aes(xintercept = mean(.data[[.x]], na.rm = TRUE)), 
+               linewidth = 1.5,
+               linetype = "dotdash",
+               color = "darkgreen") +
+    theme_minimal() +
+    labs(
+      title = paste("Histogram of", .x),
+      caption = paste("Mean:", round(mean(data[[.x]], na.rm = TRUE), 2))
+    )
+})
+
+print(continuous_histograms)
+```
+
+#### Box Plots of Continuous Variables
+
+```{r box plots}
+continuous_boxplots <- map(continuous_vars, ~ {
+  ggplot(data, aes(y = .data[[.x]])) +
+    geom_boxplot(fill = "tan",
+                   color = "black",
+                   outlier.colour = "darkred") + 
+    theme_minimal() +
+    labs(
+      title = paste("Box Plot of", .x)
+    )
+})
+
+print(continuous_boxplots)
+```
+
+### Visualizing Ordinal/Nominal Variables
+
+Next, I visualized the ordinal (e.g., `satisfaction`, `proficiency_level`) and nominal (e.g., `gender`) variables in the dataset using bar plots.
+
+#### Bar Plots of Ordinal Variables
+
+```{r bar plots ordinal}
+ordinal_vars <- c(
+  "proficiency_level",
+  "goal_completed",
+  "satisfaction"
+)
+
+ordinal_plots <- map(ordinal_vars, ~{
+  ggplot(data, aes(x = .data[[.x]])) +
+    geom_bar(fill = "tan",
+             color = "black") +
+    theme_minimal() +
+    labs(
+      title = paste("Bar Plot of", .x),
+      x = .x
+    )
+})
+
+print(ordinal_plots)
+```
+
+#### Bar Plots of Nominal Variables
+
+```{r bar plots nominal}
+nominal_vars <- c(
+  "testing_group",
+  "gender",
+  "location"
+)
+
+nominal_plots <- map(nominal_vars, ~{
+  ggplot(data, aes(x = .data[[.x]])) +
+    geom_bar(fill = "tan",
+             color = "black") +
+    theme_minimal() +
+    labs(
+      title = paste("Bar Plot of", .x),
+      x = .x
+    )
+})
+
+print(nominal_plots)
+```
+
+## Bayesian Analysis
+
+As a UX researcher at Lingua, there are several research questions that I would be interested in.
+
+### `testing_group` and `goal_completed`
+
+In this case, I am interested in the research question:
+
+*Which group (A or B) has a higher probability of completing their monthly lesson goal? How sure am I of this statement?*
+
+As I have no previous information to support an informative prior, I used the Beta distribution with a prior of \[1, 1\] (i.e., a uniform or flat prior). In essence, this means that I have no strong assumptions about the goal completion rate of group A and group B and am assuming that all goal completion rates are equally plausible.
+
+```{r goal_completed prior}
+alpha_prior <- 1 # success count before seeing data (i.e., completing goal)
+beta_prior <- 1 # failure count before seeing data (i.e., not completing goal)
+```
+
+As I will need the success/failure rates of each group to update the probability distribution, I used `dplyr` to generate some summary statistics by group.
+
+```{r goal_completed summary}
+goal_completed_summary <- data %>%
+  group_by(testing_group) %>%
+  summarise(
+    total_users = n(),
+    completed_goal = sum(goal_completed),
+    not_completed = total_users - completed_goal
+  )
+
+print(goal_completed_summary)
+```
+
+Now I have the information necessary to update the distribution.
+
+```{r goal_completed posterior}
+# creating objects for success/failure counts for group A
+success_A <- goal_completed_summary$completed_goal[goal_completed_summary$testing_group == "A"]
+failure_A <- goal_completed_summary$not_completed[goal_completed_summary$testing_group == "A"]
+
+# creating objects for success failure counts for group B
+success_B <- goal_completed_summary$completed_goal[goal_completed_summary$testing_group == "B"]
+failure_B <- goal_completed_summary$not_completed[goal_completed_summary$testing_group == "B"]
+
+# computing posterior parameters for beta distribution for group A
+alpha_posterior_A <- alpha_prior + success_A
+beta_posterior_A <- beta_prior + failure_A
+
+# computing posterior parameters for beta distribution for group B
+alpha_posterior_B <- alpha_prior + success_B
+beta_posterior_B <- beta_prior + failure_B
+
+# print updated parameters for Group A
+print(paste("Updated Beta parameters for Group A: Beta(", alpha_posterior_A, ", ", beta_posterior_A, ")", sep = ""))
+
+# print updated parameters for Group B
+
+print(paste("Updated Beta parameters for Group B: Beta(", alpha_posterior_B, ", ", beta_posterior_B, ")", sep = ""))
+```
+
+Now that I have my prior and posterior distributions, I visualized them in `ggplot2`.
+
+```{r goal_completed plot}
+set.seed(123)
+
+theta_vals <- seq(0, 1, length.out = 10000) # generating values for theta (i.e., probability that a randomly selected user completes their monthly lesson goal)
+
+prior_density <- dbeta(theta_vals, 1, 1)
+posterior_density_A <- dbeta(theta_vals, alpha_posterior_A, beta_posterior_A) # posterior beta density for group A
+posterior_density_B <- dbeta(theta_vals, alpha_posterior_B, beta_posterior_B) # posterior beta density for group B
+
+posterior_df <- data.frame(
+  theta = rep(theta_vals, 3),
+  density = c(prior_density, posterior_density_A, posterior_density_B),
+  group = rep(c("Uninformative Prior", "A: Control", "B: Gamified"), each = length(theta_vals))
+) # creating a data frame for plotting
+
+# Plot Beta posterior distributions for both groups
+ggplot(posterior_df, aes(x = theta, y = density, color = group, fill = group)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = 0, ymax = density), alpha = 0.1) + 
+  labs(title = "Prior and Posterior Distributions of Goal Completion Rate",
+       x = "Goal Completion Probability (θ)",
+       y = "Density") +
+  theme_minimal()
+```
+
+The visualization of the posterior probability distributions for groups A and B indicate that users from group B were more likely to complete their monthly lesson goal than users from group A. Next, I generated some summary statistics to better understand some details about each distribution.
+
+```{r goal_completed distribution details}
+set.seed(123)
+
+posterior_summary <- data.frame(
+  group = c("A: Control", "B: Gamified"),
+  median_theta = c(median(rbeta(10000, alpha_posterior_A, beta_posterior_A)),
+                   median(rbeta(10000, alpha_posterior_B, beta_posterior_B))),
+  lower_95_ci = c(quantile(rbeta(10000, alpha_posterior_A, beta_posterior_A), 0.025),
+                  quantile(rbeta(10000, alpha_posterior_B, beta_posterior_B), 0.025)),
+  upper_95_ci = c(quantile(rbeta(10000, alpha_posterior_A, beta_posterior_A), 0.975),
+                  quantile(rbeta(10000, alpha_posterior_B, beta_posterior_B), 0.975))
+)
+
+gt(posterior_summary)
+```
+
+As expected from the density plot, the median probability that users from group B completed their monthly lesson goal was higher than the median probability that users from group A completed their monthly lesson goal. To more directly address the question of whether our test condition increased the likelihood that a randomly selected user would complete their monthly goal, I computed the probability that theta for group B was greater than theta for group A.
+
+```{r goal_completed theta comparison}
+set.seed(123)
+
+posterior_samples_A <- rbeta(10000, alpha_posterior_A, beta_posterior_A) # sampling 10000 values of theta from the posterior distribution for group A
+posterior_samples_B <- rbeta(10000, alpha_posterior_B, beta_posterior_B) # sampling 10000 values of theta from the posterior distribution for group B
+
+prob_B_greater_A <- mean(posterior_samples_B > posterior_samples_A) # using a logical filter to calculate the proportion of samples in which theta for group B is greater than theta for group A
+
+print(prob_B_greater_A)
+```
+
+Based on this calculation, it can be stated that there is a 100% chance that users in group B have a higher goal completion rate than users in group A. Another way of understanding this is to think of two randomly selected users. If we randomly selected a user from each group, this is the probability that the user in group B would be more likely to complete their goal than the user in group A. This provides strong evidence that the gamification of the app increases the likelihood that users will complete their monthly lesson goal.
+
+Now that I have this probability, I would like to visualize the distribution of $\theta_B - \theta_A$.
+
+```{r goal_completed theta comparison visualization}
+theta_diff <- posterior_samples_B - posterior_samples_A # calculating the difference between each corresponding element in posterior_samples_B and posterior_samples_A
+
+diff_df <- data.frame(theta_diff = theta_diff)
+
+ggplot(diff_df, aes(x = theta_diff)) +
+  geom_density(fill = "blue",
+               alpha = 0.2) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed",
+             color = "red",
+             linewidth = 1) + # mark the point of no difference
+  geom_vline(xintercept = median(theta_diff),
+             color = "black",
+             size = 1) + # mark the mean difference
+  labs(title = "Posterior Distribution of θ_B - θ_A",
+       x = "Difference in Goal Completion Probability (θ_B - θ_A)",
+       y = "Density") +
+  theme_minimal()
+```
+
+In our visualization, we can see that the distribution of the difference between the goal completion rates of the groups was overwhelmingly positive (i.e., many if not all samples had a difference greater than zero).
+
+My next step was to quantify the size of the effect of gamification on goal completion via a point estimate and a 95% credible interval.
+
+```{r goal_completed theta credible interval}
+point_estimate <- median(theta_diff)
+credible_interval <- quantile(theta_diff, probs = c(0.025, 0.975))
+
+print(paste("On average, the difference between the rate of completion for group B and group A was ", round(point_estimate, 3), " with a 95% credible interval of ", round(credible_interval[1], 3), " to ", round(credible_interval[2], 3), sep = ""))
+```
+
+This result indicates a satisfactory effect of gamification on completion rates. At the lowest end of the 95% credible interval, there is a small positive effect, indicating a modest increase in completion rates from the control condition to the experimental condition. At the highest end of the 95% credible interval, there is a substantial increase in completion rates from the control condition to the experimental condition.
+
+As a final step, I will be using ROPE (Region of Practical Equivalence) as a method of determining whether the difference between the conditions is meaningful in a practical sense. I decided to define my ROPE as +/- five percentage points.
+
+```{r goal_completed rope}
+rope_range <- c(-0.05, 0.05) # defining the range for ROPE as +/- 5 percentage points for goal completion rate
+
+percent_in_rope <- mean(theta_diff > rope_range[1] & theta_diff < rope_range[2]) * 100 # calculating the proportion of difference samples that fall between -0.02 and 0.02
+
+print(paste("The percentage of difference samples that fall within the ROPE is ", round(percent_in_rope, 3), "%", sep = ""))
+```
+
+The results of the ROPE analysis suggest that the difference between the goal completion rates of the two groups is practically significant. Very few samples fall within the region of practical equivalence (+/- 5%), while the remaining samples support the conclusion that there is a meaningful difference between the goal completion rates of the two groups.
+
+### `testing_group` and `time_spent`
+
+The second research question that I am interested in is:
+
+*Which group (A or B) spent more time on the app during the testing period? How sure am I of this statement?*
+
+To answer this question, I used a Bayesian *t*-test to compare the average amount of time that users in each group spent on the app.
+
+First, I wanted to examine the summary statistics for `time_spent` by `testing_group` to get an idea of the average amount of time each group spent on the app. I used `dplyr` to generate these statistics and `ggplot2` to visualize the distributions.
+
+```{r time_spent summary}
+gt(data %>%
+  group_by(testing_group) %>%
+  summarise(
+    n_group = n(),
+    mean_time_spent = mean(time_spent, na.rm = TRUE),
+    sd_time_spent = sd(time_spent, na.rm = TRUE),
+    median_time_spent = median(time_spent, na.rm = TRUE)
+  )) # creating a table of summary statistics
+
+ggplot(data, aes(x = time_spent, fill = testing_group)) +
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "Density Plot of Time Spent by Testing Group",
+    x = "Time Spent on App (Minutes)",
+    y = "Density",
+    fill = "Group"
+  ) +
+  theme_minimal()
+```
+
+My initial results indicated a few things of interest: (a) the average time spent on the app was higher for group B than for group A and (b) the distributions for `time_spent` are not normal for either of the testing groups. To address the latter, I log-transformed the data to normalize the distributions.
+
+```{r time_spent log transform}
+data <- data %>%
+  mutate(log_time_spent = log(time_spent + 1)) # log-transforming the values and adding 1 to ensure that 0 values are not undefined
+
+ggplot(data, aes(x = log_time_spent, fill = testing_group)) +
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "Density Plot of the Log of Time Spent by Testing Group",
+    x = "Log of Time Spent on App (Minutes)",
+    y = "Density",
+    fill = "Group"
+  ) +
+  theme_minimal()
+```
+
+Unfortunately, that seemed to have the opposite effect - the data is now right-skewed!
+
+I tried a square-root transformation next to see if that would normalize the data.
+
+```{r time_spent sqrt transform}
+data <- data %>%
+  mutate(sqrt_time_spent = log10(time_spent +1))
+
+ggplot(data, aes(x = sqrt_time_spent, fill = testing_group)) +
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "Density Plot of the Square Root of Time Spent by Testing Group",
+    x = "Square Root of Time Spent on App (Minutes)",
+    y = "Density",
+    fill = "Group"
+  ) +
+  theme_minimal()
+```
+
+The square-root transformation didn't seem to help much either. I decided to try the `bestNormalize` package which has Yeo-Johnson transformations.
+
+```{r time_spent yeo johnson}
+data <- data %>%
+  mutate(yeo_johnson_time_spent = yeojohnson(time_spent)$x.t) # extracting the yeo-johnson transformed values from the output
+
+ggplot(data, aes(x = yeo_johnson_time_spent, fill = testing_group)) +
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "Density Plot of the Yeo-Johnson Transformation of Time Spent by Testing Group",
+    x = "Yeo-Johnson Transformation of Time Spent on App (Minutes)",
+    y = "Density",
+    fill = "Group"
+  ) +
+  theme_minimal()
+```
+
+This helps, but definitely introduces some issues when it comes to back-transforming the values.
+
+To keep things simple, I'll start by using the non-transformed data for the Bayesian analysis and use both (a) a regular Bayesian *t*-test and (b) a robust Bayesian *t*-test instead.
+
+```{r time_spent bayesian t-test}
+t_test <- ttestBF(
+  x = data$time_spent[data$testing_group == "B"],
+  y = data$time_spent[data$testing_group == "A"]
+)
+
+print(t_test)
+```
+
+Our Bayes Factor for the regular Bayesian *t*-test was large (i.e., BF10 = 15.3), indicating that the data strongly supports the alternative hypothesis (i.e., that there is a difference between the means of the two groups). As a rule of thumb, a Bayes Factor of 3 or higher is considered to be fairly strong evidence in favour of the alternative hypothesis. The magnitude of the Bayes Factor suggests to me that it is reasonable to infer that gamification of the app leads to higher average time spent in users. To ensure that the non-normality of the distributions did not affect the results, I will conduct a robust Bayesian *t*-test.
+
+```{r time_spent robust bayesian t-test}
+robust_t_test <- ttestBF(
+  x = data$time_spent[data$testing_group == "B"],
+  y = data$time_spent[data$testing_group == "A"],
+  rscale = "ultrawide"
+) # changing the prior distribution to favour the null hypothesis (i.e., a more conservative prior)
+
+print(robust_t_test)
+```
+
+According to the documentation for `BayesFactor`, changing the `rscale` parameter affects the scale of the Cauchy distribution being used for the prior distribution of the standardized effect size. In this case, I used the `ultrawide` setting which corresponds to a prior scale of the square root of 2. This setting is recommended when the null hypothesis is strongly favoured. Even with a conservative distribution, the alternative hypothesis (i.e., that gamification increases time spent on the app) is 8.16 times more likely than the null hypothesis (i.e., that gamification does not have an effect on time spent on the app) based on our data.
+
+Lastly, I wanted to try a Bayesian *t*-test using the data transformed from the Yeo-Johnson transformation.
+
+```{r time_spent yeo johnson bayesian t-test}
+yeo_t_test <- ttestBF(
+  x = data$yeo_johnson_time_spent[data$testing_group == "B"],
+  y = data$yeo_johnson_time_spent[data$testing_group == "A"],
+  rscale = "ultrawide"
+)
+
+print(yeo_t_test)
+```
+
+Using the Yeo-Johnson transformed data and a conservative distribution, our data is still 3.86 times more likely to occur under the alternative hypothesis (i.e., gamification increases time spent) than the null hypothesis (gamification has no effect on time spent).
+
+Finally, I wanted to visualize the posterior distribution of the difference between the means and calculate the 95% credible interval for the effect size (i.e., the difference between the means).
+
+```{r time_spent posterior visualiation}
+posterior_samples <- posterior(robust_t_test,
+                               iterations = 10000,
+                               progress = FALSE)
+
+posterior_df <- as.data.frame(posterior_samples)
+
+posterior_df <- posterior_df %>%
+  mutate(effect = `beta (x - y)`)
+
+ggplot(posterior_df, aes(x = effect)) +
+  geom_density(fill = "blue",
+               alpha = 0.3) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed",
+             linewidth = 1) +
+  labs(
+    title = "Posterior Distribution of the Difference in Time Spent Between Testing Groups",
+    x = "Difference in Time Spent (Minutes)",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+
+Our visualization shows that few (if any) of the samples fell below zero, indicating that there was a consistent positive difference between testing groups (i.e., the average amount of time spent on the app was consistently higher for users in Group B than for users in Group A). I expect that our 95% credible interval will reflect this.
+
+```{r time_spent credible interval}
+credible_interval <- quantile(posterior_df$effect, probs = c(0.025, 0.50, 0.975))
+
+print(paste("On average, users in group B spent ", round(credible_interval[2], 2), " more minutes on the app each day than users in group A, with a 95% credible interval of [", round(credible_interval[1], 2), ", ", round(credible_interval[3], 2), "].", sep = ""))
+```
+
+Indeed, our credibility interval indicates that we can 95% certain that, at the very least, gamification of the app will increase time spent by roughly half a minute.
+
+As a final step, I conducted ROPE analysis and set the range for the region of practical equivalence as +/- 45 seconds.
+
+```{r time_spent rope}
+rope_results <- rope(posterior_df$effect, range = c(-0.75, 0.75))
+
+print(rope_results)
+
+ggplot(posterior_df, aes(x = effect)) +
+  geom_density(fill = "blue", alpha = 0.3) +
+  geom_vline(xintercept = c(-0.75, 0.75), linetype = "dashed", linewidth = 1, color = "red") +  # ROPE boundaries
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = 1, color = "black") +  # Null effect
+  labs(
+    title = "Posterior Distribution with ROPE",
+    x = "Difference in Time Spent (Minutes)",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+
+Only 6.03% of the difference samples fall within our ROPE. This suggests that the effect of gamification on time spent in the app is meaningful according to these parameters.
+
+### `testing_group` and `satisfaction`
+
+For our final analysis, I am interested in the following two research questions:
+
+1.  *Does the gamification of the app increase user satisfaction? How certain am I of my conclusion?*
+2.  *What variables predict higher levels of satisfaction with the app?*
+
+#### Simple Bayesian Regression
+
+To answer the first research question, I constructed a Bayesian regression model predicting `satisfaction` from `testing_group`.
+
+Our linear model presupposes that `satisfaction` follows a normal distribution within each group.
+
+To check this assumption, I created a visualization for the distribution of `satisfaction` both collapsed across groups and for each testing group.
+
+```{r satisfaction histogram collapsed}
+ggplot(data, aes(x = satisfaction)) +
+  geom_histogram(binwidth = 1,
+                 fill = "blue",
+                 color = "black",
+                 alpha = 0.3) +
+  labs(
+    title = "Histogram of Satisfaction Scores (Collapsed)",
+    x = "Satisfaction Score (1-10)",
+    y = "Count"
+  ) +
+  scale_x_continuous(breaks = seq(0, 10)) +
+  theme_minimal()
+```
+
+We can see that the distribution of `satisfaction` is roughly normal when collapsing across the testing groups. Now, let's examine the distribution within each of the testing groups.
+
+```{r satisfaction histogram by group}
+ggplot(data, aes(x = satisfaction)) +
+  geom_histogram(binwidth = 1,
+                 fill = "blue",
+                 color = "black",
+                 alpha = 0.3) +
+  facet_wrap(vars(testing_group)) +
+  labs(
+    title = "Histogram of Satisfaction Scores by Testing Group",
+    x = "Satisfaction Score (1-10)",
+    y = "Count"
+  ) +
+  scale_x_continuous(breaks = seq(0, 10)) +
+  theme_minimal()
+```
+
+Next, I generated some basic descriptives for the `satisfaction` scores for each group.
+
+```{r satisfaction descriptives}
+data %>%
+  group_by(testing_group) %>%
+  summarize(median = median(satisfaction),
+            mean = mean(satisfaction),
+            sd = sd(satisfaction),
+            min = min(satisfaction),
+            max = max(satisfaction),
+            IQR = IQR(satisfaction)
+            )
+```
+
+The dispersion of `satisfaction` scores is similar for each group, suggesting that the variances are homogenous. Lastly, I wanted to verify that there weren't any outliers that might affect the coefficient estimates.
+
+```{r satisfaction boxplot}
+ggplot(data, aes(x = testing_group, y = satisfaction)) +
+  geom_boxplot(fill = "blue",
+               alpha = 0.3) +
+  labs(
+    title = "Box Plots of Satisfaction Scores by Testing Group",
+    y = "Satisfaction Scores (1-10)"
+  ) +
+  theme_minimal()
+```
+
+No outliers were found for either distribution. As such, I proceed to build my simple regression model using `rstanarm`:
+
+```{r satisfaction simple regression, message=FALSE}
+set.seed(123)
+
+model <- stan_glm(
+  formula = satisfaction ~ testing_group,
+  data = data,
+  family = gaussian(),
+  refresh = 0
+)
+
+model_description <- describe_posterior(model,
+                                        test = c("p_direction", "rope", "bayesfactor"),
+                                        rope_range = c(-0.5, 0.5))
+
+print(model_description)
+```
+
+Our model provides us with several key pieces of information. First, our model indicates that we can be 95% certain that the population value for the satisfaction of our control condition lies between 6.16 and 6.43. Further, we can also be 95% certain that gamification will increase the satisfaction scores from the app's current state (i.e., the control) by 0.26 to 0.65 points. Our Probability of Direction (PD) value indicates that we can be practically certain that gamification will *increase* satisfaction scores. Similarly, our Bayes Factor indicates that the probability of the alternative hypothesis (i.e., that gamification will change satisfaction scores) is 89.53 times more likely given our data than the null hypothesis (i.e., that satisfaction scores will be unaffected by gamification). Lastly our ROPE analysis suggests that 65.55% of the samples for the posterior distribution fall within 0.5 points of the control condition. This suggests that the effect of gamification on satisfaction scores, while reliable, may not be practically significant depending on the costs of implementing gamification from the developer side. 
+
+Our model diagnostics (Rhat and ESS) indicate that our model has converged properly and that our estimates are reliable.
+
+Before we move on to the next research question, I wanted to visualize some of the results from this model.
+
+```{r satisfaction model diagnostics}
+plot(point_estimate(model))
+
+plot(hdi(model))
+
+plot(bayesfactor_parameters(model))
+```
+
+#### Multiple Bayesian Regression
+
+Our first analysis suggests that we can confidently conclude that gamification, if applied, will lead to a small increase in satisfaction scores. Next, I wanted to examine what other variables predict satisfaction scores. By creating a predictive model of `satisfaction` scores, we can understand what variables (aside from - and along with - `testing_group`) are associated with higher (or lower) satisfaction scores.
+
+To begin with, let's outline our model in `rstanarm` and use `bayestestr`. Unlike our first model, we will let `rstanarm` set the priors for the distributions of the regression coefficients, the intercept, and the residual errors. The package selects weakly informative priors based on the data in order to avoid overfitting and ensure that the estimation process is stable (i.e., will converge).
+
+```{r satisfaction multiple regression}
+set.seed(123)
+
+data <- data %>%
+  mutate(user_age_centered = center(user_age),
+         time_spent_centered = center(time_spent))
+
+model <- stan_glm(
+  formula = satisfaction ~ testing_group + time_spent_centered + proficiency_level + location
+            + gender + user_age_centered + goal_completed,
+  data = data,
+  family = gaussian(),
+  refresh = 0
+)
+
+priors <- describe_prior(model)
+
+print(priors)
+
+posterior <- describe_posterior(model)
+
+print(posterior)
+
+standardized <- standardize_parameters(model)
+
+print(standardized)
+```
+
+A first glance at the posterior distributions for our estimated coefficients tells us several important pieces of information:
+
+1.  The distribution for the intercept has a median value of 5.01. This means that a user in the control group (`testing_group = A`), who is a beginner (`proficiency_level = Beginner`), from North America (`location = North America`), male (`gender = Male`) who spends the average amount of time in the app, is of average age, and has not completed a goal, is predicted to have a satisfaction score of 5.01. We can be 95% confident that the population value for this user lies between 5.79 and 6.24.
+2.  Our most important coefficients (after standardization) are `time_spent`, `goal_completed`, and `testing_group`. Specifically, we can see that increases in the first two variables are predictive of increases in satisfaction, and that users in group B report higher satisfaction than users in group A. The unstandardized and standardized coefficients represent the effects of these variables as the expected change after increasing our coefficient variable by one unit (or one SD) while keeping the remaining variables constant. Another way to understand this is as follows. We could take two users who have the exact same values for all variables (excepting the coefficient variable). Our regression coefficient represents the difference in satisfaction score that we would expect if the users differed by one unit in our coefficient variable.
+3. Even after controlling for demographic variables (e.g., `gender`, `user_age`), language proficiency at registration (i.e., `proficiency_level`), and potential indirect effects (e.g., `testing_group` affects `satisfaction` scores through increases in `goal_completed` or `time_spent`), we see that `testing_group` has a direct effect on `satisfaction` scores. Although the executives may be better poised to determine if the effect of gamification is worth the potential costs, we can be very confident that gamification produces a modest positive effect on `satisfaction`.
+
+Let's visualize some of these results:
+
+```{r satisfaction multiple regression visualizations}
+p_direction <- p_direction(model)
+
+plot(p_direction)
+
+plot(standardized)
+
+density <- estimate_density(model)
+
+plot(density)
+
+point_estimate <- point_estimate(model)
+
+plot(point_estimate)
+```
+
+Before we get carried away with any conclusions, however, let's take a deeper look at some other model diagnostics using the `performance` package:
+
+```{r satisfaction multiple regression assumptions}
+collinearity <- check_collinearity(model)
+
+plot(collinearity)
+
+pp_check <- check_predictions(model)
+
+print(pp_check)
+
+heteroscedasticity <- check_heteroscedasticity(model)
+
+plot(heteroscedasticity)
+```
+
+From an assumptions perspective, our model looks good.
+
+Let's also examine our model's performance using the `performance` package:
+
+```{r satisfaction multiple regression performance}
+model_performance <- model_performance(model)
+
+print(model_performance)
+```
+
+We can compare our model's performance against the performance metrics of a null model (i.e., intercept-only) with `test_performance()`:
+
+```{r satisfaction multiple regression comparative performance}
+null_model <- stan_glm(
+  satisfaction ~ 1,  # Only an intercept, no predictors
+  data = data,
+  family = gaussian(),
+  refresh = 0
+)
+
+comparison <- compare_performance(null_model, model)
+
+print(comparison)
+
+head_to_head <- test_performance(null_model, model)
+
+print(head_to_head)
+
+(1.557 - 1.391)/1.557
+```
+
+We can see that our model represents a significant improvement over a null model (i.e., intercept-only - or guessing the grand mean for every user) in a number of areas:
+
+1. The various information criteria and prediction metrics (i.e., the ELPD, LOOIC, and WAIC) all suggest that the model with predictors would strongly outperform the null model if applied to new testing data. Our differences are substantially larger than their standard errors, indicating that we can be confident that these differences are unlikely to be produced by random chance. 
+2. Our model explains 20.5% of the variance in the outcome variable (i.e., `satisfaction`). This is substantial, but does indicate that there is room for predictive improvement.
+3. The RMSE for our predictive model is 1.391. This means that, on average, our model's predictions deviate from the actual, observed values by 1.391 units. Given that `satisfaction` is bounded by 1 and 10, this means that our model is still fairly inaccurate. When comparing our predictive model to the null model, we see a decrease in RMSE from 1.557 to 1.391. This represents a 10.7% decrease.
+4. The Bayes Factor comparing our two models is greater than 1000 - indicating that the data that we have collected is over 1000 times as likely under our predictive model than our null model. This is very strong evidence from a Bayesian perspective that our predictive model should be preferred to our null model as a source of prediction.
+
+## Discussion
+
+The results of A/B testing suggest that the gamification of the app has a positive effect on important user engagement metrics. Bayesian analyses indicate that users exposed to the gamified app (i.e., those in group B) were more likely to (a) complete their monthly learning goal, (b) spend more time on the app, and (c) report higher satisfaction with the app than users in the control condition (i.e., group A).
+
+### Gamification Increases Goal Completion Rates
+
+- The posterior probability distribution indicated that users in the experimental condition were more likely to complete their goal () than users in the control condition.
+- The probability that users in group B had a higher completion rate than group A users was 100% (i.e., none of the posterior samples of the goal completion difference crossed zero). Further, the credible interval indicated that we can be 95% confident that we can expect a modest increase in goal completion at the least. This indicates that we can have a high degree of confidence that the gamification of the app will increase goal completion if gamification is rolled out to the entire user base.
+- ROPE analysis supported the conclusion that the gamification of the app would have a practically meaningful impact on goal completion rates, reinforcing the value of gamification in increasing user engagement and learning.
+
+### Gamification Increases Time Spent on App
+
+- Bayesian *t*-tests provided strong evidence that users in the experimental condition spent more time on the app than those in the control group .
+- Even under conservative priors and robust testing, the alternative hypothesis (i.e., that gamification of the app will increase time spent on the app if rolled out globally) was strongly supported.
+- Again, ROPE analysis suggested that the effect of gamification would be practically meaningful on time spent on the app.
+
+### Gamification Increases User Satisfaction, But the Effect is Modest
+
+- Bayesian simple regression results indicated that users in group B reported higher satisfaction with the app than users in group A. Based on the probability of direction estimate and the 95% credible interval, we can be extremely confident that we would see an increase in satisfaction if the gamification of the app was rolled out globally.
+- That being said, our ROPE analysis indicates that the effect size may not be practically significant in this metric depending on implementation costs.
+
+### Multiple Predictors Influence Satisfaction
+
+- A Bayesian multiple regression model indicated that the three strongest predictors of satisfaction were gamification, time spent on the app, and goal completion. Specifically, the results suggest that, after controlling for all other variables, users who (a) were exposed to the gamified version of the app, (b) spent more time on the app, and (c) completed their monthly learning goal were more likely to report higher satisfaction with the app.
+- Notably, gamification remained a significant predictor of satisfaction, even after accounting for other user engagement metrics (i.e., time spent, goal completion rate) and demographic variables.
+- This suggests that the gamification of the app has a direct effect on user satisfaction, but may also work indirectly to increase satisfaction by increasing engagement (i.e., time spent on the app).
+- While various metrics supported the utility of our model in predicting user satisfaction, it was also evident that the model has room for improvement. For the purposes of prediction, we should consider (a) testing other machine learning algorithms (e.g., XGBoost models, random forest models), (b) increasing the number of features and/or sample size, and (c) incorporating interaction effects or other engineered features into the model.
+
+### Key Takeaways for Stakeholders
+
+- If implemented, we can be extremely confident that gamification of the app will increase various metrics of user engagement and learning (i.e., time spent on the app, goal completion rate, user satisfaction).
+- That being said, these effects will vary in magnitude. An estimate of the cost of rolling out gamification features (e.g., streaks, badges, leaderboards) should be generated to better contextualize the value of gamification relative to its costs.
+- Developers should consider gamification as part of a broader strategy that includes other engagement-focused features. For instance, fostering a greater sense of an online community on social media platforms (e.g., Twitter, Instagram, Reddit) and creating a user forum on the app website may synergize with gamification features.
+
+### Limitations
+
+1. **Short-Term Engagement vs. Long-Term Effects**
+- A/B testing occurred over a one-month period. As such, it is difficult to make inferences about how the implementation of gamification would affect user engagement over a long period of time. 
+- It is possible that gamification produces a novelty effect, insofar as gamification may increase engagement over a short period of time but may decrease as the novelty wears off.
+- Future studies should analyze long-term retention and behavior changes.
+2. **Potential Confounds**
+- While the model controlled for key demographic and behavioral factors, other unmeasured variables (e.g., motivation, prior experiences with language learning apps) could influence results.
+- Future research could incorporate other psychological and behavioral measures to capture a more complete picture of user engagement and its predictors.
+3. **Generalizability**
+- While the majority of Lingua users are located in North America or Europe, it should be noted that the effects studied currently may not generalize to other markets (e.g., Asia, Africa).
+- Future research should examine whether gamification effects are consistent in these other regions. It may also provide further insight to examine how gamification affects user engagement more granularly (e.g., by region or country).
+
+### Future Research
+
+1. **Long-term Research**
+- As discussed previously, increasing the length of time that users are studied would is necessary to confirm that gamification produces effects that last longer than a month. Depending on the cost of gamifying the app, this research may be necessary to justify the development and implementation costs of these changes.
+2. **Gamification Design Variations**
+- Future experiments could examine which gamification features (e.g., streaks, leaderboards, rewards, challenges) are most effective at producing changes in user engagement. Currently, it can only be said that gamification (in the broadest sense) will produce positive effects in user engagement and learning metrics.
+- A factorial A/B test could compare different elements of gamification individually and in combination, which would help (a) identify the most powerful strategies for increasing user engagement and (b) determine if the effects of features are additive or multiplicative.
+3. **Personalization of Gamification**
+- It may be of interest for stakeholders to better understand *who* gamification works well for. A future study could incorporate individual difference variables (e.g., personality) to determine how gamification interacts with these variables to produce changes in user engagement and learning.
+- Down the line, this could potentially inform individualized gamification strategies that tailor the app experience to the individual user based on model predictions.
+4. **Profitability of Gamification**
+- While the current study provided substantial evidence that gamification will produce positive effects on various user engagement and learning metrics in the short term, it cannot be said whether this will impact revenue and profitability.
+- More data is necessary to draw any conclusions regarding the downstream impact of user engagement and learning on subscriptions, merchandise purchasing, etc.
+
+## Conclusion
+
+The results of the A/B test suggest that gamification would be an effective way to increase user engagement and learning for Lingua users. Specifically, we are highly confident that gamification features will lead to higher completion rates, increased time spent on the app, and modestly higher satisfaction. Further discussions should be had to determine whether these effects justify the costs of global roll-out.
